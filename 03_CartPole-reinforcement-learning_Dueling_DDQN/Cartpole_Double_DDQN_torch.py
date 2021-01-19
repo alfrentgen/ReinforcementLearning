@@ -6,21 +6,46 @@ import gym
 import pylab
 import numpy as np
 from collections import deque
-from torch import nn, optim, zeros, from_numpy, amax, argmax, full
+from torch import nn, optim, zeros, from_numpy, amax, argmax, full, mean
 from torch import load as load_model
 from torch import save as save_model
 from collections import OrderedDict
 #from sys import exit
 
-def getModel(input_shape, action_space):
-    model = nn.Sequential(OrderedDict([
-        ('lin0', nn.Linear(input_shape, 512, True)),
-        ('relu0', nn.ReLU()),
-        ('lin1', nn.Linear(512, 256, True)),
-        ('relu1', nn.ReLU()),
-        ('lin2', nn.Linear(256, 64, True)),
-        ('relu2', nn.ReLU()),
-        ('lin3', nn.Linear(64, action_space, True))]))
+class DoubleDDQN(nn.Module):
+    def __init__(self, input_shape, action_space, dueling):
+        super(DoubleDDQN, self).__init__()
+        seq_layers = OrderedDict([
+            ('lin0', nn.Linear(input_shape, 512, True)),
+            ('relu0', nn.ReLU()),
+            ('lin1', nn.Linear(512, 256, True)),
+            ('relu1', nn.ReLU()),
+            ('lin2', nn.Linear(256, 64, True)),
+            ('relu2', nn.ReLU())
+            ])
+        
+        self.dueling = dueling
+        if dueling:
+            self.add_module('sequential', nn.Sequential(seq_layers))
+            self.add_module('state_value_layer', nn.Linear(64, 1, True))
+            self.add_module('action_advantage_layer', nn.Linear(64, action_space, True))
+        else:
+            seq_layers['lin3'] = nn.Linear(64, action_space, True)
+            self.add_module('sequential', nn.Sequential(seq_layers))
+        
+    def forward(self, x):
+        if self.dueling:
+            x = self.sequential(x)
+            action_advantage = self.action_advantage_layer(x)
+            state_value = self.state_value_layer(x)
+            #TODO: check q's dimensionality
+            q = state_value + (action_advantage - mean(action_advantage))
+            return q
+        else:
+            return self.sequential(x)
+
+def getModel(input_shape, action_space, dueling):
+    model = DoubleDDQN(input_shape, action_space, dueling)
     print(model)
     return model
 
@@ -39,35 +64,37 @@ class DQNAgent:
         
         self.gamma = 0.95    # discount rate
         self.epsilon = 1.0  # exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.999
-        self.batch_size = 32
+        self.epsilon_min = 0.01 # minimum exploration probability
+        self.epsilon_decay = 0.999 # exponential decay rate for exploration prob
+        self.batch_size = 32 
         self.train_start = 1000
 
         # defining model parameters
-        self.ddqn = True
-        self.Soft_Update = False
+        self.ddqn = True # use doudle deep q network
+        self.Soft_Update = False # use soft parameter update
+        self.dueling = True # use dealing netowrk
 
         self.TAU = 0.1 # target network soft update hyperparameter
 
         self.Save_Path = 'Models'
+        if not os.path.exists(self.Save_Path): os.makedirs(self.Save_Path)
         self.scores, self.episodes, self.average = [], [], []
         
         if self.ddqn:
             print("----------Double DQN--------")
-            self.Model_name = os.path.join(self.Save_Path,"DDQN_"+self.env_name+".h5")
+            self.Model_name = os.path.join(self.Save_Path,"Dueling DDQN_"+self.env_name+".h5")
         else:
             print("-------------DQN------------")
-            self.Model_name = os.path.join(self.Save_Path,"DQN_"+self.env_name+".h5")
+            self.Model_name = os.path.join(self.Save_Path,"Dueling DQN_"+self.env_name+".h5")
         
         # create main model
-        self.model = getModel(input_shape=self.state_size, action_space = self.action_size)
-        self.target_model = getModel(input_shape=self.state_size, action_space = self.action_size)
+        self.model = getModel(input_shape=self.state_size, action_space = self.action_size, dueling=self.dueling)
+        self.target_model = getModel(input_shape=self.state_size, action_space = self.action_size, dueling=self.dueling)
         self.target_model.eval()
         self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.00025, alpha=0.95, eps=0.01)
         self.criterion = nn.MSELoss()
         
-            # after some time interval update the target model to be same with model
+    # after some time interval update the target model to be same with model
     def update_target_model(self):
         if not self.Soft_Update and self.ddqn:
             for name in self.target_model.state_dict():
@@ -148,7 +175,7 @@ class DQNAgent:
         self.target_model = load_model(name)
 
     def save(self, name):
-        print("Model saved!")
+        #print("Model saved!")
         save_model(self.model, name)
         
     pylab.figure(figsize=(18, 9))
@@ -205,15 +232,15 @@ class DQNAgent:
                     print("episode: {}/{}, score: {}, e: {:.2}, average: {}".format(e, self.EPISODES, i, self.epsilon, average))
                     if i == self.env._max_episode_steps:
                         print("Saving trained model as cartpole-ddqn.h5")
-                        self.save(f"cartpole-ddqn_ep{e}_torch.h5")
-                        self.save(f"cartpole-ddqn_torch.h5")
+                        self.save(f"cartpole-dueling-ddqn_ep{e}_torch.h5")
+                        self.save(f"cartpole-dueling-ddqn_torch.h5")
                         break
                 self.replay()
 
     def test(self):
         self.model.eval()
         self.target_model.eval()
-        self.load("cartpole-ddqn_torch.h5")
+        self.load("cartpole-dueling-ddqn_torch.h5")
         #self.load("cartpole-ddqn_ep{}_torch.h5".format(episode_number))
         for e in range(self.EPISODES):
             state = self.env.reset()

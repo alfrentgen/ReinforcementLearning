@@ -205,7 +205,7 @@ class DQNAgent:
                     print("episode: {}/{}, score: {}, e: {:.2}, average: {}".format(e, self.EPISODES, i, self.epsilon, average))
                     if i == self.env._max_episode_steps:
                         print("Saving trained model as cartpole-ddqn.h5")
-                        #self.save("cartpole-ddqn.h5")
+                        self.save("cartpole-ddqn.h5")
                         break
                 self.replay()
 
