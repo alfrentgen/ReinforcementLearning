@@ -101,7 +101,7 @@ class DQNAgent:
                 shape = self.target_model.state_dict()[name].shape
                 zeros(size=shape, out=self.target_model.state_dict()[name])
                 self.target_model.state_dict()[name].add_(self.model.state_dict()[name].clone())
-                self.target_model.state_dict()[name].detach()
+                self.target_model.state_dict()[name].detach_()
             return
         if self.Soft_Update and self.ddqn:
             for name in self.target_model.state_dict():
