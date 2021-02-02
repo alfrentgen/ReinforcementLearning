@@ -5,11 +5,10 @@ import random
 import gym
 import pylab
 import numpy as np
-from collections import deque
+from collections import deque, OrderedDict
 from torch import nn, optim, zeros, from_numpy, amax, argmax, full, mean
 from torch import load as load_model
 from torch import save as save_model
-from collections import OrderedDict
 from PER import *
 
 class DoubleDDQN(nn.Module):
@@ -266,7 +265,7 @@ class DQNAgent:
         self.model.eval()
         self.target_model.eval()
         self.load("cartpole-dueling-ddqn_torch.h5")
-        #self.load("cartpole-ddqn_ep{}_torch.h5".format(episode_number))
+        #self.load("cartpole-dueling-ddqn_ep{}_torch.h5".format(episode_number))
         for e in range(self.EPISODES):
             state = self.env.reset()
             state = np.reshape(state, [1, self.state_size])
