@@ -6,9 +6,8 @@ import random
 import gym
 import pylab
 import numpy as np
-from torch import nn, optim, zeros, from_numpy, amax, argmax, full, mean
-from torch import load as load_model
-from torch import save as save_model
+import torch
+from torch import nn, optim
 from torch.distributions import Categorical
 from collections import OrderedDict
 import cv2
@@ -23,7 +22,6 @@ class Actor(nn.Module):
             ('lin0', nn.Linear(input_size, 512, True)),
             ('act0', nn.ELU()),
             ('lin1', nn.Linear(512, action_space, True)),
-            ('act1', nn.Softmax()),
             ])
 
         self.add_module('sequential', nn.Sequential(seq_layers))
@@ -31,7 +29,7 @@ class Actor(nn.Module):
     def forward(self, x):
         return self.sequential(x)
 
-def getModel(input_shape, action_space):
+def getActor(input_shape, action_space):
     actor = Actor(input_shape, action_space)
     print(actor)
     return actor
@@ -65,22 +63,22 @@ class PGAgent:
         self.model_name = os.path.join(self.save_path, self.path)
 
         # Create Actor network model
-        self.actor = getModel(input_shape=self.state_size, action_space = self.action_size)
+        self.actor = getActor(input_shape=self.state_size, action_space = self.action_size)
         self.optimizer = optim.RMSprop(self.actor.parameters(), lr=self.lr, alpha=0.95, eps=1e-07)
+        #self.optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
 
     def remember(self, state, action, reward):
         # store episode actions to memory
         self.states.append(state)
-        action_onehot = np.zeros([self.action_size])
-        action_onehot[action] = 1
-        self.actions.append(action_onehot)
+        self.actions.append(action)
         self.rewards.append(reward)
 
     def act(self, state):
         # Use the network to predict the next action to take, using the model
         state = state.reshape((state.shape[0], self.REM_STEP*self.ROWS*self.COLS)).float()
-        action = Categorical(self.actor(state)[0])
-        return action.sample().detach().numpy()
+        prediction = self.actor(state)
+        action = Categorical(torch.nn.functional.softmax(prediction, dim = 1)).sample()
+        return action.item()
 
     def discount_rewards(self, reward):
         # Compute the gamma-discounted rewards over an episode
@@ -94,31 +92,30 @@ class PGAgent:
             discounted_r[i] = running_add
 
         discounted_r -= np.mean(discounted_r) # normalizing the result
-        discounted_r /= np.std(discounted_r) + self.eps # divide by standard deviation, eps to prevend division by 0
+        std = np.std(discounted_r)
+        #prevent division by 0
+        if std == 0:
+            std = self.eps
+        discounted_r /= std
         return discounted_r
 
     def replay(self):
+        self.optimizer.zero_grad()
         # reshape memory to appropriate shape for training
-        states = from_numpy(np.vstack(self.states))
+        states = torch.from_numpy(np.vstack(self.states))
         states = states.reshape((states.shape[0], self.REM_STEP*self.ROWS*self.COLS)).float()
-        actions = from_numpy(np.vstack(self.actions))
-        #print(actions)
+        action_probs = self.actor(states)
+        
+        # get episode actions
+        actions = torch.tensor(data=self.actions, dtype=torch.long)
 
         # Compute discounted rewards
-        discounted_rewards = self.discount_rewards(self.rewards)
-        discounted_rewards = from_numpy(discounted_rewards)
+        discounted_rewards = torch.from_numpy(self.discount_rewards(self.rewards))
         
-        #https://github.com/pytorch/examples/blob/master/reinforcement_learning/reinforce.py
         # training PG network
-        self.optimizer.zero_grad()
-        logprob = self.actor(states).log()
-        mask = actions.bool()
-        #print(logprob.masked_select(mask))
-        selected_logprobs = discounted_rewards * logprob.masked_select(mask)
-        #print(discounted_rewards.shape)
-        #print(selected_logprobs)
-        score = -selected_logprobs.sum()
-        #print(score)
+        loss_fn = nn.CrossEntropyLoss(reduction='none')
+        score = loss_fn(action_probs, actions) * discounted_rewards
+        score = score.sum()
         score.backward()
         self.optimizer.step()
         
@@ -126,10 +123,10 @@ class PGAgent:
         self.states, self.actions, self.rewards = [], [], []
         
     def load(self, name):
-        self.actor = load_model(name)
+        self.actor = torch.load(name)
         
     def save(self, name):
-        save_model(self.actor, name)
+        torch.save(self.actor, name)
 
     pylab.figure(figsize=(18, 9))
     def PlotModel(self, score, episode):
@@ -206,7 +203,7 @@ class PGAgent:
             while not done:
                 #self.env.render()
                 # Actor picks an action
-                action = self.act(from_numpy(state))
+                action = self.act(torch.from_numpy(state))
                 # Retrieve new state, reward, and whether the state is terminal
                 next_state, reward, done, _ = self.step(action)
                 # Memorize (state, action, reward) for training
@@ -240,7 +237,7 @@ class PGAgent:
             score = 0
             while not done:
                 self.env.render()
-                action = argmax(self.actor(state))
+                action = torch.argmax(self.actor(state))
                 state, reward, done, _ = self.step(action)
                 score += reward
                 if done:
