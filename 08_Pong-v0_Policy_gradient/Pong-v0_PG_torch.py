@@ -43,7 +43,7 @@ class PGAgent:
         self.env = gym.make(env_name)
         self.action_size = self.env.action_space.n
         self.EPISODES, self.max_average = 10000, -21.0 # specific for pong
-        self.lr = 0.000025
+        self.lr = 0.001
 
         self.ROWS = 80
         self.COLS = 80
@@ -64,8 +64,7 @@ class PGAgent:
 
         # Create Actor network model
         self.actor = getActor(input_shape=self.state_size, action_space = self.action_size)
-        self.optimizer = optim.RMSprop(self.actor.parameters(), lr=self.lr, alpha=0.95, eps=1e-07)
-        #self.optimizer = optim.Adam(self.actor.parameters(), lr=self.lr)
+        self.optimizer = optim.RMSprop(self.actor.parameters(), lr=self.lr, alpha=0.9, eps=1e-07)
 
     def remember(self, state, action, reward):
         # store episode actions to memory
@@ -237,7 +236,7 @@ class PGAgent:
             score = 0
             while not done:
                 self.env.render()
-                action = torch.argmax(self.actor(state))
+                action = self.act(torch.from_numpy(state))
                 state, reward, done, _ = self.step(action)
                 score += reward
                 if done:
@@ -250,5 +249,5 @@ if __name__ == "__main__":
     env_name = 'PongDeterministic-v4'
     agent = PGAgent(env_name)
     agent.run()
-    #agent.test('Models/PongDeterministic-v4_PG_2.5e-05.h5')
+    agent.test(agent.model_name)
     #agent.test('Models/Pong-v0_PG_2.5e-05.h5')
