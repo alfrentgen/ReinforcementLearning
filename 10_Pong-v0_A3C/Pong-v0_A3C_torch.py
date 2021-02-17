@@ -60,7 +60,7 @@ class A3CAgent:
         self.env_name = env_name
         self.action_size = gym.make(self.env_name).action_space.n
         self.EPISODES, self.episode, self.max_average = 20000, 0, -21.0 # specific for pong
-        self.lr = 0.001
+        self.lr = 0.0001
 
         self.ROWS = 80
         self.COLS = 80
