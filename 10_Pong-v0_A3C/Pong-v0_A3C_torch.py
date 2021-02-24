@@ -2,7 +2,6 @@
 # Tutorial written for - Tensorflow 1.15, Keras 2.2.4
 
 import os
-import random
 import gym
 import pylab
 import numpy as np
@@ -11,8 +10,8 @@ from torch import nn, optim
 from torch.distributions import Categorical
 from collections import OrderedDict
 import cv2
-import threading
-from threading import Thread, Lock
+from threading import Thread, Lock
+
 import time
 
 class Actor(nn.Module):
@@ -175,41 +174,42 @@ class A3CAgent:
             cv2.destroyAllWindows()
             return
 
-    def getImage(self, frame, image_memory):
-        if image_memory.shape == (1,*self.state_size):
-            image_memory = np.squeeze(image_memory)
-            
-        # croping frame to 80x80 size
-        frame_cropped = frame[35:195:2, ::2,:]
-        if frame_cropped.shape[0] != self.COLS or frame_cropped.shape[1] != self.ROWS:
-            # OpenCV resize function 
-            frame_cropped = cv2.resize(frame, (self.COLS, self.ROWS), interpolation=cv2.INTER_CUBIC)
-        
-        # converting to RGB (numpy way)
-        frame_rgb = 0.299*frame_cropped[:,:,0] + 0.587*frame_cropped[:,:,1] + 0.114*frame_cropped[:,:,2]
-
-        # convert everything to black and white (agent will train faster)
-        frame_rgb[frame_rgb < 100] = 0
-        frame_rgb[frame_rgb >= 100] = 255
-        # converting to RGB (OpenCV way)
-        #frame_rgb = cv2.cvtColor(frame_cropped, cv2.COLOR_RGB2GRAY)     
-
-        # dividing by 255 we expresses value to 0-1 representation
-        new_frame = np.array(frame_rgb).astype(np.float32) / 255.0
-
-        # push our data by 1 frame, similar as deq() function work
-        image_memory = np.roll(image_memory, 1, axis = 0)
-
-        # inserting new frame to free space
-        image_memory[0,:,:] = new_frame
-
-        # show image frame   
-        #self.imshow(image_memory,0)
-        #self.imshow(image_memory,1)
-        #self.imshow(image_memory,2)
-        #self.imshow(image_memory,3)
-        
-        return np.expand_dims(image_memory, axis=0)
+    def getImage(self, frame, image_memory):
+        if image_memory.shape == (1,*self.state_size):
+            image_memory = np.squeeze(image_memory)
+
+        # croping frame to 80x80 size
+        frame_cropped = frame[35:195:2, ::2,:]
+        if frame_cropped.shape[0] != self.COLS or frame_cropped.shape[1] != self.ROWS:
+            # OpenCV resize function 
+            frame_cropped = cv2.resize(frame, (self.COLS, self.ROWS), interpolation=cv2.INTER_CUBIC)
+
+        # converting to RGB (numpy way)
+        frame_rgb = 0.299*frame_cropped[:,:,0] + 0.587*frame_cropped[:,:,1] + 0.114*frame_cropped[:,:,2]
+
+        # convert everything to black and white (agent will train faster)
+        frame_rgb[frame_rgb < 100] = 0
+        frame_rgb[frame_rgb >= 100] = 255
+
+        # converting to RGB (OpenCV way)
+        #frame_rgb = cv2.cvtColor(frame_cropped, cv2.COLOR_RGB2GRAY)
+
+        # dividing by 255 we expresses value to 0-1 representation
+        new_frame = np.array(frame_rgb).astype(np.float32) / 255.0
+
+        # push our data by 1 frame, similar as deq() function work
+        image_memory = np.roll(image_memory, 1, axis = 0)
+
+        # inserting new frame to free space
+        image_memory[0,:,:] = new_frame
+
+        # show image frame
+        #self.imshow(image_memory,0)
+        #self.imshow(image_memory,1)
+        #self.imshow(image_memory,2)
+        #self.imshow(image_memory,3)
+        return np.expand_dims(image_memory, axis=0)
+
 
     def reset(self, env):
         image_memory = np.zeros(self.state_size)
@@ -223,102 +223,110 @@ class A3CAgent:
         next_state = self.getImage(next_state, image_memory)
         return next_state, reward, done, info
     
-    def train(self, n_threads):
-        # Instantiate one environment per thread
-        envs = [gym.make(self.env_name) for i in range(n_threads)]
-
-        # Create threads
+    def train(self, n_threads):
+        # Instantiate one environment per thread
+        envs = [gym.make(self.env_name) for i in range(n_threads)]
+
+        # Create threads
         self.actor.train()
         self.critic.train()
-        threads = [threading.Thread(
-                target=self.train_threading,
-                daemon=True,
-                args=(self,
-                    envs[i],
-                    i)) for i in range(n_threads)]
-
-        for t in threads:
-            time.sleep(2)
-            t.start()
-            
-        for t in threads:
-            time.sleep(10)
+        threads = [Thread(
+                target=self.train_threading,
+                daemon=True,
+                args=(self,
+                    envs[i],
+                    i)) for i in range(n_threads)]
+
+        for t in threads:
+            time.sleep(2)
+            t.start()
+
+        for t in threads:
+            time.sleep(10)
             t.join()
     
-    def train_threading(self, agent, env, thread):
-            while self.episode < self.EPISODES:
-                # Reset episode
-                score, done, SAVING = 0, False, ''
-                state = self.reset(env)
-                # Instantiate or reset games memory
-                states, actions, rewards = [], [], []
-                while not done:
-                    action = agent.act(torch.from_numpy(state))
-                    next_state, reward, done, _ = self.step(action, env, state)
-
-                    states.append(state)
-                    actions.append(action)
-                    rewards.append(reward)
-                    
-                    score += reward
-                    state = next_state
+    def train_threading(self, agent, env, thread):
+            while self.episode < self.EPISODES:
+                # Reset episode
+                score, done, SAVING = 0, False, ''
+                state = self.reset(env)
+
+                # Instantiate or reset games memory
+                states, actions, rewards = [], [], []
+                while not done:
+                    action = agent.act(torch.from_numpy(state))
+                    next_state, reward, done, _ = self.step(action, env, state)
+
+                    states.append(state)
+                    actions.append(action)
+                    rewards.append(reward)
+
+                    score += reward
+                    state = next_state
 
                 with self.lock:
-                    self.replay(states, actions, rewards)
-                        
-                # Update episode count
-                with self.lock:
-                    average = self.PlotModel(score, self.episode)
-                    # saving best models
-                    if average >= self.max_average:
-                        self.max_average = average
-                        self.save()
-                        SAVING = "SAVING"
-                    else:
-                        SAVING = ""
-                    print(f"episode: {self.episode}/{self.EPISODES}, thread: {thread}, score: {score}, average: {average:.2f} {SAVING}")
+                    self.replay(states, actions, rewards)
+
+                # Update episode count
+                with self.lock:
+                    average = self.PlotModel(score, self.episode)
+                    # saving best models
+                    if average >= self.max_average:
+                        self.max_average = average
+                        self.save()
+                        SAVING = "SAVING"
+                    else:
+                        SAVING = ""
+
+                    print(f"episode: {self.episode}/{self.EPISODES}, thread: {thread}, score: {score}, average: {average:.2f} {SAVING}"
+)
                     if self.episode < self.EPISODES:
-                        self.episode += 1
+                        self.episode += 1
+
             env.close()
 
     
     def run(self):
         env = gym.make(env_name)
-        while self.episode < self.EPISODES:
-            # Reset episode
-            score, done, SAVING = 0, False, ''
-            state = self.reset(env)
-            # Instantiate or reset games memory
-            states, actions, rewards = [], [], []
-            while not done:
-                action = self.act(torch.from_numpy(state))
-                next_state, reward, done, _ = self.step(action, env, state)
+        while self.episode < self.EPISODES:
+            # Reset episode
+            score, done, SAVING = 0, False, ''
+            state = self.reset(env)
+            # Instantiate or reset games memory
+            states, actions, rewards = [], [], []
 
-                states.append(state)
-                actions.append(action)
-                rewards.append(reward)
+            while not done:
+                action = self.act(torch.from_numpy(state))
+                next_state, reward, done, _ = self.step(action, env, state)
+
+                states.append(state)
+                actions.append(action)
+                rewards.append(reward)
                     
-                score += reward
-                state = next_state
+                score += reward
+                state = next_state
 
-            self.replay(states, actions, rewards)
-                        
-            # Update episode count
-            average = self.PlotModel(score, self.episode)
-            # saving best models
-            if average >= self.max_average:
-                self.max_average = average
-                self.save()
-                SAVING = "SAVING"
-            else:
-                SAVING = ""
-            print(f"episode: {self.episode}/{self.EPISODES}, single thread, score: {score}, average: {average:.2f} {SAVING}")
-            if self.episode < self.EPISODES:
-                self.episode += 1
+            self.replay(states, actions, rewards)
+
+            # Update episode count
+            average = self.PlotModel(score, self.episode)
+            # saving best models
+            if average >= self.max_average:
+                self.max_average = average
+                self.save()
+                SAVING = "SAVING"
+            else:
+                SAVING = ""
+
+            print(f"episode: {self.episode}/{self.EPISODES}, single thread, score: {score}, average: {average:.2f} {SAVING}"
+)
+            if self.episode < self.EPISODES:
+                self.episode += 1
+
         env.close()
 
     def test(self):
-        #self.load()
+        self.load()
         self.actor.eval()
         self.critic.eval()
         env = gym.make(self.env_name)
@@ -336,10 +344,10 @@ class A3CAgent:
                     break
         env.close()
 
-if __name__ == "__main__":
-    env_name = 'PongDeterministic-v4'
-    #env_name = 'Pong-v0'
-    agent = A3CAgent(env_name)
-    #agent.run() # use as A2C
-    agent.train(n_threads = 4) # use as A3C
+if __name__ == "__main__":
+    env_name = 'PongDeterministic-v4'
+    #env_name = 'Pong-v0'
+    agent = A3CAgent(env_name)
+    #agent.run() # use as A2C
+    agent.train(n_threads = 4) # use as A3C
     agent.test()
