@@ -24,12 +24,12 @@ class Actor(nn.Module):
         self.add_module('actor', nn.Sequential(layers))
 
     def forward(self, x):
-        return self.actor(x)
+        x = self.actor(x)
+        x = x.clamp(min = torch.finfo(x.dtype).eps)
+        return x
 
     def ppo_loss(self, y_true, y_pred):
         advantages, prediction_picks, actions = y_true[0], y_true[1], y_true[2]
-        #print(advantages, prediction_picks, actions)
-        #print(type(y_true[0]), type(y_true[1]), type(y_true[2]))
         LOSS_CLIPPING = 0.2
         #C1 = 1
         C2 = 0.001
@@ -39,25 +39,15 @@ class Actor(nn.Module):
         prob = torch.clamp(prob, epsilon, 1.0)
         old_prob = prediction_picks * actions
         old_prob = torch.clamp(old_prob, epsilon, 1.0)
-
-        ratio = prob/(old_prob + epsilon)
+        ratio = prob/old_prob
         #ratio = torch.exp(torch.log(prob) - torch.log(old_prob))
-        p1 = ratio * advantages[:, None]
-        p2 = torch.clamp(ratio, min = 1 - LOSS_CLIPPING, max = 1 + LOSS_CLIPPING) * advantages[:, None]
+        p1 = ratio * advantages
+        p2 = torch.clamp(ratio, min = 1 - LOSS_CLIPPING, max = 1 + LOSS_CLIPPING) * advantages
 
-        #minimum = torch.minimum(p1, p2).mean()
-        #print(minimum)
         loss_clipped = -torch.minimum(p1, p2).mean()
-        #print(p1, p2)
-        #print(loss_clipped)
-        #loss_vfs = C1 * advantages**2 * actions
-        #loss_ent = -C2 * (prob * torch.log(prob + epsilon))
         loss_ent = -(y_pred * torch.log(y_pred + epsilon))
         loss_ent = C2 * loss_ent.mean()
-        #print(loss_clipped.item(), loss_ent.item())
         loss = loss_clipped - loss_ent #- loss_vfs
-        #loss =  -loss.mean()
-        #print(loss)
         return loss
 
     def load_weights(self):
@@ -93,13 +83,9 @@ class Critic(nn.Module):
     def forward(self, x):
         return self.critic(x)
 
-    #TODO: check if the calculated value is too big
     def critic_ppo2_loss(self, y_true, y_pred, base_values):
         LOSS_CLIPPING = 0.2
-        #print(type(y_pred), type(base_values))
         clipped_value_loss = base_values + torch.clamp(y_pred - base_values, -LOSS_CLIPPING, LOSS_CLIPPING)
-        #print(y_true)#, type(clipped_value_loss))
-        #print(clipped_value_loss)
         v_loss1 = (y_true - clipped_value_loss) ** 2
         v_loss2 = (y_true - y_pred) ** 2
 
@@ -115,8 +101,6 @@ class Critic(nn.Module):
                 idx = 0
                 for c in ch:
                     if type(c) == nn.Linear:
-                        #print(c.weight.shape, imported_weights[idx].transpose().shape)
-                        print(c.bias.shape, imported_weights[idx+1].shape)
                         c.weight = nn.Parameter(torch.from_numpy(imported_weights[idx].transpose()))
                         c.bias = nn.Parameter(torch.from_numpy(imported_weights[idx+1]))
                         idx += 2

@@ -27,7 +27,7 @@ class PPOAgent:
         self.shuffle=False
         self.Training_batch = 1000
         self.replay_count = 0
-        self.optimizer = optim.RMSprop#optim.Adam
+        self.optimizer = optim.Adam
         self.writer = SummaryWriter(comment="_"+self.env_name+"_"+self.optimizer.__name__+"_"+str(self.lr))
 
         # Instantiate plot memory
@@ -44,8 +44,8 @@ class PPOAgent:
 
         # Create ActorCritic network model
         self.actor, self.critic = getModels(input_shape=self.state_size, action_space = self.action_size)
-        self.actor_optimizer = self.optimizer(self.actor.parameters(), lr=self.lr)
-        self.critic_optimizer = self.optimizer(self.critic.parameters(), lr=self.lr)
+        self.actor_optimizer = self.optimizer(params = self.actor.parameters(), lr=self.lr)
+        self.critic_optimizer = self.optimizer(params = self.critic.parameters(), lr=self.lr)
 
     def train(self, flag=True):
         if flag:
@@ -88,20 +88,10 @@ class PPOAgent:
             pylab.xlabel('Steps', fontsize=18)
             try:
                 pylab.grid(True)
-                pylab.savefig(self.env_name+".png")
+                pylab.savefig(self.env_name+"_torch.png")
             except OSError:
                 pass
-        # saving best models
-        if self.average_[-1] >= self.max_average:
-            self.max_average = self.average_[-1]
-            self.save()
-            SAVING = "SAVING"
-            # decrease learning rate every saved model
-            self.lr *= 0.95
-        else:
-            SAVING = ""
-
-        return self.average_[-1], SAVING
+        return
 
     def act(self, state):
         prediction = self.actor(torch.from_numpy(state))
@@ -145,7 +135,6 @@ class PPOAgent:
         actions = torch.from_numpy(np.vstack(actions))
         predictions = torch.from_numpy(np.vstack(predictions))
         critic_base_values = self.critic(states).detach()
-        #print(predictions)
         values = self.critic(states)
         next_values = self.critic(next_states)
         advantages, targets = self.get_gaes(rewards, dones, values.detach().numpy(), next_values.detach().numpy())
@@ -160,12 +149,11 @@ class PPOAgent:
             # Get Critic network predictions
             y_pred = self.actor(states)
             actor_loss = self.actor.ppo_loss(y_true, y_pred)
-            #print(actor_loss)
             actor_history.append(actor_loss.item())
             actor_loss.backward()
             self.actor_optimizer.step()
-            #print(critic_base_values)
             values = self.critic(states)
+
             critic_loss = self.critic.critic_ppo2_loss(torch.from_numpy(targets), values, critic_base_values)
             critic_history.append(critic_loss.item())
             #print(critic_loss)
@@ -188,7 +176,7 @@ class PPOAgent:
             states, next_states, actions, rewards, predictions, dones = [], [], [], [], [], []
             self.eval()
             while not done:
-                env.render()
+                #env.render()
                 # Actor picks an action
                 action, action_onehot, prediction = self.act(state)
                 # Retrieve new state, reward, and whether the state is terminal
@@ -205,14 +193,22 @@ class PPOAgent:
                 score += reward
 
             self.episode += 1
-            average, SAVING = self.PlotModel(score, self.episode)
+            self.PlotModel(score, self.episode)
+            # saving best models
+            SAVING = ""
+            if self.average_[-1] >= self.max_average:
+                self.max_average = self.average_[-1]
+                self.save()
+                SAVING = "SAVING"
+                # decrease learning rate every saved model
+                self.lr *= 0.95
+            average = self.average_[-1]
+
             print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
             self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
             self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
 
             self.train()
-            #for item in [states, actions, rewards, predictions, dones, next_states]:
-                #print(type(item[0]))
             self.replay(states, actions, rewards, predictions, dones, next_states)
             if self.episode >= self.EPISODES:
                 break
@@ -222,6 +218,7 @@ class PPOAgent:
         env = gym.make(env_name)
         self.actor.load_weights()
         self.critic.load_weights()
+        self.eval()
         while True:
             states = np.load("states.dmp.npy", allow_pickle = True)
             next_states = np.load("next_states.dmp.npy", allow_pickle = True)
@@ -231,13 +228,14 @@ class PPOAgent:
             #state = np.reshape(state, [1, self.state_size[0]]) # shape = [1, 8]
             # Instantiate or reset games memory
             actions, predictions = [], []
-            self.eval()
             idx = 0
             while not done:
             #while idx < len(dones):
                 #env.render()
                 # Actor picks an action
+                #print(state)
                 action, action_onehot, prediction = self.act(state)
+                #print(prediction)
                 # Retrieve new state, reward, and whether the state is terminal
                 next_state, reward, done, _ = next_states[idx], rewards[idx], dones[idx], None
                 # Memorize (state, action, reward) for training
@@ -254,7 +252,16 @@ class PPOAgent:
                 idx += 1
 
             self.episode += 1
-            average, SAVING = self.PlotModel(score, self.episode)
+            self.PlotModel(score, self.episode)
+            # saving best models
+            SAVING = ""
+            if self.average_[-1] >= self.max_average:
+                self.max_average = self.average_[-1]
+                self.save()
+                SAVING = "SAVING"
+                # decrease learning rate every saved model
+                self.lr *= 0.95
+            average = self.average_[-1]
             print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
             self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
             self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
@@ -295,7 +302,16 @@ class PPOAgent:
                 score += reward
                 if done:
                     self.episode += 1
-                    average, SAVING = self.PlotModel(score, self.episode)
+                    self.PlotModel(score, self.episode)
+                    # saving best models
+                    SAVING = ""
+                    if self.average_[-1] >= self.max_average:
+                        self.max_average = self.average_[-1]
+                        self.save()
+                        SAVING = "SAVING"
+                        # decrease learning rate every saved model
+                        self.lr *= 0.95
+                    average = self.average_[-1]
                     print("episode: {}/{}, score: {}, average: {:.2f} {}".format(self.episode, self.EPISODES, score, average, SAVING))
                     self.writer.add_scalar(f'Workers:{1}/score_per_episode', score, self.episode)
                     self.writer.add_scalar(f'Workers:{1}/learning_rate', self.lr, self.episode)
@@ -309,11 +325,30 @@ class PPOAgent:
                 break
         env.close()
 
+    def test(self, test_episodes = 100):
+        self.load()
+        env = gym.make(env_name)
+        for e in range(100):
+            state = env.reset()
+            state = np.reshape(state, [1, self.state_size[0]])
+            done = False
+            score = 0
+            while not done:
+                env.render()
+                action = torch.argmax(self.actor(torch.from_numpy(state))[0])
+                state, reward, done, _ = env.step(action.detach().numpy())
+                state = np.reshape(state, [1, self.state_size[0]])
+                score += reward
+                if done:
+                    print("episode: {}/{}, score: {}".format(e, test_episodes, score))
+                    break
+        env.close()
+
 if __name__ == "__main__":
     env_name = 'LunarLander-v2'
     agent = PPOAgent(env_name)
-    agent.run_dump()
+    #agent.run_dump()
     #agent.run() # train as PPO, train every epesode
-    #agent.run_batch() # train as PPO, train every batch, trains better
+    agent.run_batch() # train as PPO, train every batch, trains better
     #agent.run_multiprocesses(num_worker = 8)  # train PPO multiprocessed (fastest)
-    #agent.test()
+    agent.test()

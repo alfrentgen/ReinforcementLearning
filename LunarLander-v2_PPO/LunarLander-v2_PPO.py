@@ -30,7 +30,7 @@ from threading import Thread, Lock
 from multiprocessing import Process, Pipe
 import time
 
-#tf.enable_eager_execution()
+tf.enable_eager_execution()
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if len(gpus) > 0:
     print(f'GPUs {gpus}')
@@ -78,12 +78,11 @@ class Actor_Model:
         output = Dense(self.action_space, activation="softmax")(X)
 
         self.Actor = Model(inputs = X_input, outputs = output)
-        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr))#, run_eagerly = True)
+        self.Actor.compile(loss=self.ppo_loss, optimizer=optimizer(lr=lr), run_eagerly = True)
 
     def ppo_loss(self, y_true, y_pred):
         # Defined in https://arxiv.org/abs/1707.06347
         advantages, prediction_picks, actions = y_true[:, :1], y_true[:, 1:1+self.action_space], y_true[:, 1+self.action_space:]
-        #tf.print(advantages, prediction_picks, actions, output_stream=sys.stdout)
         LOSS_CLIPPING = 0.2
         ENTROPY_LOSS = 0.001
 
@@ -96,13 +95,9 @@ class Actor_Model:
         ratio = K.exp(K.log(prob) - K.log(old_prob))
         p1 = ratio * advantages
         p2 = K.clip(ratio, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantages
-
-        #minimum = K.mean(K.minimum(p1, p2))
-        #tf.print(minimum)
         actor_loss = -K.mean(K.minimum(p1, p2))
         entropy = -(y_pred * K.log(y_pred + 1e-10))
         entropy = ENTROPY_LOSS * K.mean(entropy)
-        #tf.print(actor_loss, entropy, output_stream=sys.stdout)
         total_loss = actor_loss - entropy
 
         return total_loss
@@ -184,7 +179,6 @@ class PPOAgent:
         self.Actor_name = f"{self.env_name}_PPO_Actor.h5"
         self.Critic_name = f"{self.env_name}_PPO_Critic.h5"
 
-
     def act(self, state):
         """ example:
         pred = np.array([0.05, 0.85, 0.1])
@@ -240,7 +234,8 @@ class PPOAgent:
         #discounted_r = self.discount_rewards(rewards)
         #advantages = np.vstack(discounted_r - values)
         advantages, target = self.get_gaes(rewards, dones, np.squeeze(values), np.squeeze(next_values))
-        #print(advantages.shape, target.shape)
+        #print(advantages) the same
+        #print(target) the same
         '''
         pylab.plot(advantages,'.')
         pylab.plot(target,'-')
@@ -255,6 +250,7 @@ class PPOAgent:
         y_true = np.hstack([advantages, predictions, actions])
 
         # training Actor and Critic networks
+        #print('!FIT!')
         a_loss = self.Actor.Actor.fit(states, y_true, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
         c_loss = self.Critic.Critic.fit([states, values], target, epochs=self.epochs, verbose=0, shuffle=self.shuffle)
         print(a_loss.history['loss'])
@@ -337,7 +333,7 @@ class PPOAgent:
 
                     state, done, score, SAVING = self.env.reset(), False, 0, ''
                     state = np.reshape(state, [1, self.state_size[0]])
-                    print(len(states))
+                    break
 
             if self.episode >= self.EPISODES:
                 break
@@ -472,6 +468,7 @@ class PPOAgent:
         self.env.close()
 
     def run_dump(self, save = False): # train only when episode is finished
+        np.random.seed(1337) # for reproducibility
         if save:
             self.Actor.save_weights()
             self.Critic.save_weights()
@@ -525,8 +522,6 @@ class PPOAgent:
                         state = np.reshape(state, [1, self.state_size[0]])
                     break
 
-            #print(f'!!!!{done}')
-            #print(states)
             if save:
                 np.save("states.dmp", states)
                 np.save("next_states.dmp", next_states)
@@ -541,7 +536,7 @@ if __name__ == "__main__":
     env_name = 'LunarLander-v2'
     agent = PPOAgent(env_name)
     #agent.run() # train as PPO, train every epesode
-    agent.run_dump(save = False) # train as PPO, train every epesode
-    #agent.run_batch() # train as PPO, train every batch, trains better
+    #agent.run_dump(save = False) # train as PPO, train every epesode
+    agent.run_batch() # train as PPO, train every batch, trains better
     #agent.run_multiprocesses(num_worker = 8)  # train PPO multiprocessed (fastest)
-    #agent.test()
+    agent.test()
